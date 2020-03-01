@@ -66,7 +66,6 @@ type
     { Public declarations }
     Constructor Create(AOwner:TComponent; DevID:Integer); reintroduce; overload;
     destructor Destroy; override;
-    procedure Reset;
     class property DeviceCount:Integer read getDevCount;
     property X:Integer read getX;
     property Y:Integer read GetY;
@@ -141,17 +140,6 @@ implementation
       fOnMove(self, TheMsg.LParamLo, TheMsg.LParamHi, 0);
   end;
 
-  procedure TJoystick.Reset;
-  var Result:MMRESULT;
-  begin
-    joyReleaseCapture(fID);
-     Result:= joySetCapture(Handle, 0,10,True);
-     if Result = MMSYSERR_NOERROR then
-       joyGetDevCaps(0, @fDevCaps, sizeof(fDevCaps))
-     else
-       Raise Exception.Create('Error Creating Joystick');
-  end;
-
 function TJoystick.getMaxX;
   begin
     Result:=fDevCaps.wXmax;
@@ -189,35 +177,33 @@ function TJoystick.getMaxX;
   procedure TJoystick.setStatus(var TheMsg:TMessage);
   var Msg:TMessage;
       BtnsDn, BtnsUp, BtnsDelta:Integer;
-      Delta:Boolean;
   begin
-    MX.Acquire;
   // No matter what status change occurs, we always send X and Y position
     Msg.LParamLo:=fDeltaStatus.wXpos;
     Msg.LParamHi:=fDeltaStatus.wYpos;
-    Delta:=False;
+  // acquire the mutex for accessing fCurrentState and fDeltaStatus
+    MX.Acquire;
+//    determine if Joystick moved enough to generate a move event
     if (ABS(fDeltaStatus.wXpos - fCurrentState.wXpos-fDZX) > fDZX) or (ABS(fDeltaStatus.wYpos - fCurrentState.wYpos-fDZX) > fDZY) then begin
       Msg.Msg:=PJ_JOYSTICK_MOVE;
-      Delta:=True;
     end;
+//  determine which buttons changed
     BtnsDelta:= fDeltaStatus.wButtons XOR fCurrentState.wButtons;
-    if BtnsDelta > 0 then begin
-      Delta:=True;
-      BtnsDn := BtnsDelta AND fDeltaStatus.wButtons;
-      BtnsUp := BtnsDelta AND fCurrentState.wButtons;
-      if BtnsDn > 0 then begin
-        Msg.Msg := PJ_BUTTON_DOWN;
-        Msg.WParam := BtnsDn;
-      end;
-      if BtnsUp > 0 then begin
-        Msg.Msg := PJ_BUTTON_UP;
-        Msg.WParam := BtnsUp;
-      end;
+// determines HOW buttons have changed
+    BtnsDn := BtnsDelta AND fDeltaStatus.wButtons;
+    BtnsUp := BtnsDelta AND fCurrentState.wButtons;
+    if BtnsDn > 0 then begin
+      Msg.Msg := PJ_BUTTON_DOWN;
+      Msg.WParam := BtnsDn;
     end;
-    Dispatch(Msg);
-    if Delta then
-      fCurrentState:=fDeltaStatus;
+    if BtnsUp > 0 then begin
+      Msg.Msg := PJ_BUTTON_UP;
+      Msg.WParam := BtnsUp;
+    end;
+// save the new data as current
+    fCurrentState:=fDeltaStatus;
     MX.Release;
+    Dispatch(Msg);
   end;
 
 { TJoystick.PollThread }
